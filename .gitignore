@@ -1,4 +1,4 @@
-# Virtual environment
+# Virtual environments (including uv)
 .venv/
 venv/
 env/

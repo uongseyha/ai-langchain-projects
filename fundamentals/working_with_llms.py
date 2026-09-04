@@ -14,6 +14,16 @@ from langchain_core.messages import HumanMessage, SystemMessage
 load_dotenv()
 
 
+def anthropic_options() -> dict[str, dict[str, str]]:
+    workspace_id = os.getenv("ANTHROPIC_WORKSPACE_ID")
+    if not workspace_id:
+        raise RuntimeError(
+            "ANTHROPIC_WORKSPACE_ID is required for this Anthropic API key. "
+            "Add the workspace ID to .env."
+        )
+    return {"default_headers": {"anthropic-workspace-id": workspace_id}}
+
+
 def demo_init_chat_model():
     chat_model = init_chat_model(
         model="gpt-4o-mini",
@@ -34,6 +44,7 @@ def demo_init_chat_model():
             temperature=0.7,
             streaming=True,
             max_retries=3,
+            **anthropic_options(),
         )
 
         response = claude.invoke("What is the capital of France? Answer in one word.")
@@ -63,6 +74,7 @@ def demo_model_comparison():
             model_provider="anthropic",
             temperature=0.7,
             streaming=False,
+            **anthropic_options(),
         )
 
     print(f"Prompt: {prompt}\n")
@@ -119,13 +131,13 @@ def exercise_multi_model():
         return responses
 
     # Test the function
-    results = get_responses("What is AI?", ["gpt-4o-mini", "gpt-4o"])
+    results = get_responses("What is AI? answer in 1 sentence.", ["gpt-4o-mini", "gpt-4o"])
     for model, answer in results.items():
         print(f"Response from {model}: {answer}\n")
 
 
 if __name__ == "__main__":
     # demo_init_chat_model()
-    demo_model_comparison()
+    # demo_model_comparison()
     # demo_message()
-    # exercise_multi_model()
+    exercise_multi_model()
