@@ -1,4 +1,6 @@
 
+import shutil
+
 from langchain_core.chat_history import InMemoryChatMessageHistory
 from langchain_core.documents import Document
 from pydantic import BaseModel, Field
@@ -8,6 +10,11 @@ from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_chroma import Chroma
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_classic.retrievers.multi_query import MultiQueryRetriever
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.output_parsers import StrOutputParser
+
+from data import seed_mock_data
 
 load_dotenv()
 
@@ -115,7 +122,93 @@ class AIResearchAssistant:
                 sources.add(metadata["source"])
         return sorted(list(sources))
 
+    def _build_retriever(self, use_advanced: bool = False):
+        """Build retriever -- basic or advanced"""
+
+        # Base: simple similarity search
+        base_retriever = self.vectorstore.as_retriever(
+            search_type="similarity", search_kwargs={"k": 4}
+        )
+
+        if not use_advanced:
+            return base_retriever
+
+        # Multi-query: LLM generates multiple search queries
+        multi_retriever = MultiQueryRetriever.from_llm(
+            retriever=base_retriever,
+            llm=self.llm,
+        )
+
+        return multi_retriever
+
+    def _format_docs_for_context(self, docs) -> str:
+        """Format retrieved documents into a string for the prompt."""
+        if not docs:
+            return "No relevant documents found."
+
+        formatted = []
+        for i, doc in enumerate(docs):
+            source = doc.metadata.get("source", "Unknown")
+            formatted.append(f"[Source {i+1}: {source}]\n{doc.page_content}")
+        return "\n\n---\n\n".join(formatted)
+
+    def ask(
+        self, question: str, session_id: str = "default", use_advanced: bool = True
+    ) -> str:
+        """Ask a question against the research documents."""
+
+        # Step 1: Use basic or advanced retriever
+        retriever = self._build_retriever(use_advanced=use_advanced)
+        docs = retriever.invoke(question)
+
+        # Step 2: Format retrieved docs for context
+        context = self._format_docs_for_context(docs)
+
+        # Step 3: Build the prompt
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    """You are an AI Research Assistant. Answer questions
+    based ONLY on the provided context documents.
+
+    Rules:
+    1. Only use information from the context below
+    2. If the context doesn't have the answer, say so
+    3. Cite which sources you used (e.g. "According to Source 1...")
+    4. Rate your confidence: high, medium, or low""",
+                ),
+                (
+                    "human",
+                    """Context documents:
+
+    {context}
+
+    Question: {question}
+
+    Provide a clear answer with source citations.""",
+                ),
+            ]
+        )
+
+        # Step 4: Build and run the chain
+        chain = prompt | self.llm | StrOutputParser()
+
+        response = chain.invoke(
+            {
+                "context": context,
+                "question": question
+            }
+        )
+
+        return response
+
 if __name__ == "__main__":
+    shutil.rmtree("./research_db", ignore_errors=True)
     assistant = AIResearchAssistant(persist_directory="./research_db")
-    print(f"Total indexed chunks: {assistant.get_document_count()}")
-    print(f"Sources: {assistant.list_sources()}")
+    seed_mock_data(assistant)
+
+    
+
+    # Cleanup
+    shutil.rmtree("./research_db", ignore_errors=True)

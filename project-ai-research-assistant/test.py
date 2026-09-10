@@ -1,5 +1,6 @@
 from langchain_core.documents import Document
 from main import AIResearchAssistant
+from data import mock_research_data, seed_mock_data
 
 
 def make_assistant():
@@ -33,7 +34,72 @@ def run_add_text_test():
     assert chunk_count > 0
 
 
+def run_build_retriever_test():
+    assistant = make_assistant()
+    seed_mock_data(assistant)
+
+    retriever = assistant._build_retriever()
+    docs = retriever.invoke("What is attention in neural networks?")
+
+    print(f"_build_retriever smoke test passed: {len(docs)} documents retrieved")
+    assert retriever is not None
+    assert isinstance(docs, list)
+    assert len(docs) > 0
+
+
+def run_format_docs_for_context_test():
+    assistant = make_assistant()
+    docs = [
+        Document(
+            page_content="Retrieval is the process of finding relevant passages from indexed documents.",
+            metadata={"source": "retrieval_notes.txt"},
+        ),
+        Document(
+            page_content="Context formatting helps the model answer questions using only the most relevant chunks.",
+            metadata={"source": "context_notes.txt"},
+        ),
+    ]
+
+    formatted = assistant._format_docs_for_context(docs)
+    print("_format_docs_for_context smoke test passed:")
+    print(formatted)
+    assert "[Source 1: retrieval_notes.txt]" in formatted
+    assert "[Source 2: context_notes.txt]" in formatted
+    assert "Retrieval is the process" in formatted
+    assert "Context formatting helps" in formatted
+
+
+def run_ask_test():
+    assistant = make_assistant()
+    seed_mock_data(assistant)
+
+    response = assistant.ask("What is attention in neural networks?")
+
+    print("ask() smoke test passed:")
+    print(response)
+    assert isinstance(response, str)
+    assert len(response) > 0
+    assert "attention" in response.lower()
+
+
+def run_ask_failure_test():
+    assistant = make_assistant()
+    seed_mock_data(assistant)
+
+    response = assistant.ask("What is .NET?")
+
+    print("ask() failure-case smoke test passed:")
+    print(response)
+    assert isinstance(response, str)
+    assert len(response) > 0
+    assert any(word in response.lower() for word in ["not found", "doesn't have", "context", "unable", "no relevant"])
+
+
 if __name__ == "__main__":
-    run_add_documents_test()
-    run_add_text_test()
+    # run_add_documents_test()
+    # run_add_text_test()
+    # run_build_retriever_test()
+    # run_format_docs_for_context_test()
+    # run_ask_test()
+    run_ask_failure_test()
 
