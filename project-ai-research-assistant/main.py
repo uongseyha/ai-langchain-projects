@@ -1,6 +1,4 @@
 
-import shutil
-
 from langchain_core.chat_history import InMemoryChatMessageHistory, BaseChatMessageHistory
 from langchain_core.documents import Document
 from langchain_core.messages import AIMessage, HumanMessage
@@ -14,8 +12,6 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_classic.retrievers.multi_query import MultiQueryRetriever
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.output_parsers import StrOutputParser
-
-from data import seed_mock_data
 
 load_dotenv()
 
@@ -175,6 +171,60 @@ class AIResearchAssistant:
             }
             for m in self.session_store[session_id].messages
         ]
+
+    def compare_retrievers(self, question: str):
+        """Show basic vs advanced retrieval side by side."""
+
+        print(f'Question: "{question}"\n')
+
+        # --- Basic ---
+        basic = self.vectorstore.as_retriever(
+            search_type="similarity", search_kwargs={"k": 4}
+        )
+        basic_docs = basic.invoke(question)
+
+        print("=" * 60)
+        print(f"BASIC RETRIEVER: {len(basic_docs)} chunks")
+        print("=" * 60)
+
+        basic_total_chars = 0
+        for i, doc in enumerate(basic_docs):
+            source = doc.metadata.get("source", "Unknown")
+            basic_total_chars += len(doc.page_content)
+            print(f"\n  Chunk {i+1} [{source}] ({len(doc.page_content)} chars):")
+            print(f"  {doc.page_content[:150]}...")
+
+        print(f"\n  Total text sent to LLM: {basic_total_chars} chars")
+
+        # --- Advanced ---
+        advanced = self._build_retriever(use_advanced=True)
+        advanced_docs = advanced.invoke(question)
+
+        print("\n" + "=" * 60)
+        print(f"ADVANCED RETRIEVER: {len(advanced_docs)} chunks")
+        print("=" * 60)
+
+        advanced_total_chars = 0
+        for i, doc in enumerate(advanced_docs):
+            source = doc.metadata.get("source", "Unknown")
+            advanced_total_chars += len(doc.page_content)
+            print(f"\n  Chunk {i+1} [{source}] ({len(doc.page_content)} chars):")
+            print(f"  {doc.page_content[:150]}...")
+
+        print(f"\n  Total text sent to LLM: {advanced_total_chars} chars")
+
+        # --- Summary ---
+        print("\n" + "=" * 60)
+        print("COMPARISON")
+        print("=" * 60)
+        print(f"  Basic:    {len(basic_docs)} chunks, {basic_total_chars} chars")
+        print(f"  Advanced: {len(advanced_docs)} chunks, {advanced_total_chars} chars")
+
+        if advanced_total_chars < basic_total_chars:
+            reduction = round((1 - advanced_total_chars / basic_total_chars) * 100)
+            print(f"  Compression saved {reduction}% of tokens!")
+        else:
+            print(f"  Advanced found more targeted content")
     
     def ask(
         self, question: str, session_id: str = "default", use_advanced: bool = True
@@ -235,12 +285,76 @@ class AIResearchAssistant:
 
         return response
 
-if __name__ == "__main__":
-    shutil.rmtree("./research_db", ignore_errors=True)
-    assistant = AIResearchAssistant(persist_directory="./research_db")
-    seed_mock_data(assistant)
+    def ask_structured(
+        self,
+        question: str,
+        session_id: str = "default",
+        use_advanced: bool = True,
+    ) -> ResearchResponse:
+        """Ask a question and get a structured response."""
 
+        # LLM that returns a Pydantic object instead of a string
+        structured_llm = self.llm.with_structured_output(ResearchResponse)
 
+        # Get memory
+        history = self._get_session_history(session_id)
 
-    # Cleanup
-    shutil.rmtree("./research_db", ignore_errors=True)
+        # Retrieve
+        retriever = self._build_retriever(use_advanced=use_advanced)
+        docs = retriever.invoke(question)
+        context = self._format_docs_for_context(docs)
+        sources = list(set(d.metadata.get("source", "Unknown") for d in docs))
+
+        # Prompt -- tell the LLM about available sources
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    """You are an AI Research Assistant. Analyze the provided documents 
+    and return a structured response.
+
+    Rules:
+    1. ONLY use information from the provided context
+    2. If the context doesn't have the answer, say so in the answer field
+    3. Set confidence: "high" if directly stated, "medium" if inferred, "low" if partial
+    4. Include the source filenames you actually used
+    5. Extract key quotes word-for-word from the context
+    6. Suggest 2-3 follow-up questions the user might want to ask
+
+    Use conversation history to understand follow-up questions.""",
+                ),
+                MessagesPlaceholder(variable_name="history"),
+                (
+                    "human",
+                    """Context documents:
+
+    {context}
+
+    Available sources: {sources}
+
+    Question: {question}""",
+                ),
+            ]
+        )
+
+        chain = prompt | structured_llm
+
+        response = chain.invoke(
+            {
+                "context": context,
+                "question": question,
+                "sources": ", ".join(sources),
+                "history": (
+                    history.messages[-10:]
+                    if hasattr(history, "messages")
+                    else history[-10:]
+                ),
+            }
+        )
+
+        # Save to memory (store just the answer text)
+        history.add_message(HumanMessage(content=question))
+        history.add_message(AIMessage(content=response.answer))
+
+        return response
+    
