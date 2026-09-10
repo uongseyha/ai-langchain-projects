@@ -5,6 +5,10 @@ research questions from a private collection of indexed documents. The
 assistant retrieves relevant source passages before asking an LLM to generate
 an answer, helping keep responses grounded in the available research material.
 
+# Demo Image
+
+![AI Research Assistant demo](https://github.com/user-attachments/assets/6082a252-3bb7-47d3-b61e-387a603aa4f8)
+
 ## Problem Statement
 
 Research information is often spread across multiple documents, making it
