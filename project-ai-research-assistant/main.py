@@ -1,8 +1,9 @@
 
 import shutil
 
-from langchain_core.chat_history import InMemoryChatMessageHistory
+from langchain_core.chat_history import InMemoryChatMessageHistory, BaseChatMessageHistory
 from langchain_core.documents import Document
+from langchain_core.messages import AIMessage, HumanMessage
 from pydantic import BaseModel, Field
 from typing import List, Dict, Optional
 from datetime import datetime
@@ -152,10 +153,35 @@ class AIResearchAssistant:
             formatted.append(f"[Source {i+1}: {source}]\n{doc.page_content}")
         return "\n\n---\n\n".join(formatted)
 
+    def _get_session_history(self, session_id: str) -> BaseChatMessageHistory:
+        """Get or create session history."""
+        if session_id not in self.session_store:
+            self.session_store[session_id] = InMemoryChatMessageHistory()
+        return self.session_store[session_id]
+
+    def clear_session(self, session_id: str):
+        if session_id in self.session_store:
+            self.session_store[session_id].clear()
+            print(f"Cleared session: {session_id}")
+
+    def get_session_messages(self, session_id: str) -> list:
+        """Get conversation history as readable dicts."""
+        if session_id not in self.session_store:
+            return []
+        return [
+            {
+                "role": "human" if isinstance(m, HumanMessage) else "assistant",
+                "content": m.content,
+            }
+            for m in self.session_store[session_id].messages
+        ]
+    
     def ask(
         self, question: str, session_id: str = "default", use_advanced: bool = True
     ) -> str:
         """Ask a question against the research documents."""
+
+        history = self._get_session_history(session_id)
 
         # Step 1: Use basic or advanced retriever
         retriever = self._build_retriever(use_advanced=use_advanced)
@@ -178,6 +204,7 @@ class AIResearchAssistant:
     3. Cite which sources you used (e.g. "According to Source 1...")
     4. Rate your confidence: high, medium, or low""",
                 ),
+                MessagesPlaceholder(variable_name="history"),
                 (
                     "human",
                     """Context documents:
@@ -197,9 +224,14 @@ class AIResearchAssistant:
         response = chain.invoke(
             {
                 "context": context,
-                "question": question
+                "question": question,
+                "history": history.messages[-10:],  # last 10 messages for context
             }
         )
+
+        # save this Q&A to history
+        history.add_message(HumanMessage(content=question))
+        history.add_message(AIMessage(content=response))
 
         return response
 
@@ -208,7 +240,7 @@ if __name__ == "__main__":
     assistant = AIResearchAssistant(persist_directory="./research_db")
     seed_mock_data(assistant)
 
-    
+
 
     # Cleanup
     shutil.rmtree("./research_db", ignore_errors=True)

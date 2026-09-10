@@ -92,7 +92,47 @@ def run_ask_failure_test():
     print(response)
     assert isinstance(response, str)
     assert len(response) > 0
-    assert any(word in response.lower() for word in ["not found", "doesn't have", "context", "unable", "no relevant"])
+    assert any(
+        word in response.lower()
+        for word in ["not found", "doesn't have", "context", "unable", "no relevant"]
+    )
+
+
+def run_ask_session_test():
+    assistant = make_assistant()
+    seed_mock_data(assistant)
+
+    q = "What is attention in neural networks?"
+    response_a = assistant.ask(q, session_id="session_a")
+    response_b = assistant.ask(q, session_id="session_b")
+
+    print("ask() session smoke test passed:")
+    print(f"Session A: {response_a}")
+    print(f"Session B: {response_b}")
+    assert isinstance(response_a, str) and len(response_a) > 0
+    assert isinstance(response_b, str) and len(response_b) > 0
+    assert "attention" in response_a.lower()
+    assert "attention" in response_b.lower()
+    assert response_a == response_b
+
+
+def run_ask_session_scenario_test():
+    assistant = make_assistant()
+    seed_mock_data(assistant)
+
+    first = assistant.ask("What is attention in neural networks?", session_id="scenario_session")
+    second = assistant.ask("What are the key concepts mentioned?", session_id="scenario_session")
+    third = assistant.ask("What is the first question I ask?", session_id="scenario_session")
+
+    print("ask() session scenario smoke test passed:")
+    print(f"First: {first}")
+    print(f"Second: {second}")
+    print(f"Third: {third}")
+    assert isinstance(first, str) and len(first) > 0
+    assert isinstance(second, str) and len(second) > 0
+    assert isinstance(third, str) and len(third) > 0
+    assert "key concepts" in second.lower() or "qkv" in second.lower() or "multi-head" in second.lower()
+    assert "attention" in third.lower()
 
 
 if __name__ == "__main__":
@@ -101,5 +141,7 @@ if __name__ == "__main__":
     # run_build_retriever_test()
     # run_format_docs_for_context_test()
     # run_ask_test()
-    run_ask_failure_test()
+    # run_ask_failure_test()
+    # run_ask_session_test()
+    run_ask_session_scenario_test()
 
